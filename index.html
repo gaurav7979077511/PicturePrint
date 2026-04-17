@@ -1,1 +1,546 @@
 
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:var(--font-sans,sans-serif);background:transparent;color:var(--color-text-primary);}
+.wrap{padding:12px 0;display:flex;flex-direction:column;gap:16px;}
+.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 14px;background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:12px;}
+.toolbar label{font-size:13px;color:var(--color-text-secondary);}
+.toolbar select,.toolbar button{font-size:13px;padding:5px 10px;border-radius:6px;border:0.5px solid var(--color-border-secondary);background:var(--color-background-secondary);color:var(--color-text-primary);cursor:pointer;}
+.export-btn{background:#2563eb!important;color:#fff!important;border-color:#1d4ed8!important;font-weight:500;}
+.export-btn:hover{background:#1d4ed8!important;}
+.page-card{border:0.5px solid var(--color-border-tertiary);border-radius:12px;padding:14px;background:var(--color-background-primary);}
+.section-title{font-size:14px;font-weight:500;margin-bottom:4px;}
+.section-sub{font-size:11px;color:var(--color-text-secondary);margin-bottom:10px;}
+.a4-wrap{display:flex;justify-content:center;overflow:auto;}
+.a4{background:white;border:1.5px solid #888;position:relative;flex-shrink:0;}
+.cell{position:absolute;background:white;}
+.photo-drop{position:absolute;background:white;overflow:hidden;cursor:pointer;border:0.5px solid #ccc;}
+.photo-drop.dragover{outline:2px dashed #2563eb;}
+.photo-canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:none;pointer-events:none;}
+.drop-hint{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;pointer-events:none;}
+.drop-hint .plus{font-size:20px;color:#ccc;line-height:1;}
+.drop-hint .lbl{font-size:7px;color:#bbb;letter-spacing:0.3px;}
+.has-img .drop-hint{display:none;}
+.photo-controls{position:absolute;display:none;gap:3px;z-index:10;background:rgba(255,255,255,0.92);border:0.5px solid #ddd;border-radius:5px;padding:2px 4px;bottom:3px;right:3px;}
+.photo-drop:hover .photo-controls,.photo-drop.has-img:hover .photo-controls{display:flex;}
+.photo-controls button{font-size:10px;padding:2px 5px;border-radius:3px;border:0.5px solid #ccc;background:white;cursor:pointer;color:#333;line-height:1.4;}
+.photo-controls button:hover{background:#f0f0f0;}
+.notes-area{position:absolute;background:white;border-top:0.5px solid #ccc;}
+.notes-line{position:absolute;border-bottom:0.5px solid #e0e0e0;}
+.prog{font-size:12px;color:var(--color-text-secondary);}
+/* Modal overlay */
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:100;align-items:center;justify-content:center;}
+.modal-bg.open{display:flex;}
+.modal{background:white;border-radius:12px;padding:20px;width:340px;max-width:95vw;display:flex;flex-direction:column;gap:12px;}
+.modal h3{font-size:14px;font-weight:500;color:#333;}
+.modal-canvas-wrap{position:relative;width:100%;height:220px;background:#f5f5f5;border-radius:6px;overflow:hidden;border:0.5px solid #ddd;cursor:grab;}
+.modal-canvas-wrap:active{cursor:grabbing;}
+.modal-canvas-wrap canvas{position:absolute;}
+.modal-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.modal-row label{font-size:12px;color:#555;min-width:50px;}
+.modal-row input[type=range]{flex:1;}
+.modal-row span{font-size:12px;color:#333;min-width:28px;text-align:right;}
+.modal-btn{padding:5px 12px;border-radius:6px;border:0.5px solid #ccc;background:#f5f5f5;font-size:13px;cursor:pointer;color:#333;}
+.modal-btn.primary{background:#2563eb;color:white;border-color:#1d4ed8;}
+.modal-btn:hover{background:#e5e5e5;}
+.modal-btn.primary:hover{background:#1d4ed8;}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;}
+</style>
+
+<div class="wrap" id="root"></div>
+<input type="file" id="fileInput" accept="image/*" style="display:none;">
+
+<!-- Edit modal -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <h3 id="modalTitle">Adjust photo</h3>
+    <div class="modal-canvas-wrap" id="modalWrap">
+      <canvas id="modalCanvas"></canvas>
+    </div>
+    <div class="modal-row">
+      <label>Zoom</label>
+      <input type="range" id="slZoom" min="0.5" max="5" step="0.05" value="1">
+      <span id="slZoomVal">1.0×</span>
+    </div>
+    <div class="modal-row">
+      <label>Rotate</label>
+      <input type="range" id="slRot" min="-180" max="180" step="1" value="0">
+      <span id="slRotVal">0°</span>
+    </div>
+    <div class="modal-row">
+      <button class="modal-btn" id="rot90">↻ 90°</button>
+      <button class="modal-btn" id="rot90cc">↺ 90°</button>
+      <button class="modal-btn" id="fitBtn">Fit</button>
+      <button class="modal-btn" id="fillBtn">Fill</button>
+    </div>
+    <div class="modal-actions">
+      <button class="modal-btn" id="removeBtn" style="margin-right:auto;color:#c00;">Remove</button>
+      <button class="modal-btn" id="cancelBtn">Cancel</button>
+      <button class="modal-btn primary" id="applyBtn">Apply</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+const S=28;
+function cm(v){return Math.round(v*S);}
+const A4W=cm(21),A4H=cm(29.7);
+const BDR=0.2,NOTE=2.0;
+
+// State per drop zone
+const photoState=new Map(); // key=drop el → {img, zoom, rot, panX, panY}
+
+let activeDrop=null, activeState=null;
+let modalDragging=false, mdX=0, mdY=0, mdPX=0, mdPY=0;
+
+const fileInput=document.getElementById('fileInput');
+const modalBg=document.getElementById('modalBg');
+const modalCanvas=document.getElementById('modalCanvas');
+const modalWrap=document.getElementById('modalWrap');
+const slZoom=document.getElementById('slZoom');
+const slRot=document.getElementById('slRot');
+const slZoomVal=document.getElementById('slZoomVal');
+const slRotVal=document.getElementById('slRotVal');
+let mCtx=modalCanvas.getContext('2d');
+let mW=0,mH=0;
+
+function openModal(drop){
+  activeDrop=drop;
+  const s=photoState.get(drop);
+  activeState={...s, img:s.img};
+  slZoom.value=activeState.zoom;
+  slRot.value=activeState.rot;
+  slZoomVal.textContent=parseFloat(activeState.zoom).toFixed(2)+'×';
+  slRotVal.textContent=Math.round(activeState.rot)+'°';
+  mW=modalWrap.clientWidth||300;
+  mH=modalWrap.clientHeight||220;
+  modalCanvas.width=mW;
+  modalCanvas.height=mH;
+  modalCanvas.style.width=mW+'px';
+  modalCanvas.style.height=mH+'px';
+  drawModal();
+  modalBg.classList.add('open');
+}
+
+function drawModal(){
+  mCtx.clearRect(0,0,mW,mH);
+  mCtx.fillStyle='#f5f5f5';
+  mCtx.fillRect(0,0,mW,mH);
+  if(!activeState||!activeState.img)return;
+  mCtx.save();
+  mCtx.translate(mW/2+activeState.panX, mH/2+activeState.panY);
+  mCtx.rotate(activeState.rot*Math.PI/180);
+  mCtx.scale(activeState.zoom, activeState.zoom);
+  const img=activeState.img;
+  mCtx.drawImage(img, -img.naturalWidth/2, -img.naturalHeight/2);
+  mCtx.restore();
+}
+
+slZoom.addEventListener('input',()=>{
+  activeState.zoom=parseFloat(slZoom.value);
+  slZoomVal.textContent=activeState.zoom.toFixed(2)+'×';
+  drawModal();
+});
+slRot.addEventListener('input',()=>{
+  activeState.rot=parseFloat(slRot.value);
+  slRotVal.textContent=Math.round(activeState.rot)+'°';
+  drawModal();
+});
+document.getElementById('rot90').addEventListener('click',()=>{
+  activeState.rot=(activeState.rot+90)%360;
+  slRot.value=activeState.rot;
+  slRotVal.textContent=Math.round(activeState.rot)+'°';
+  drawModal();
+});
+document.getElementById('rot90cc').addEventListener('click',()=>{
+  activeState.rot=(activeState.rot-90+360)%360;
+  slRot.value=activeState.rot;
+  slRotVal.textContent=Math.round(activeState.rot)+'°';
+  drawModal();
+});
+document.getElementById('fitBtn').addEventListener('click',()=>{
+  if(!activeState.img)return;
+  const iw=activeState.img.naturalWidth,ih=activeState.img.naturalHeight;
+  activeState.zoom=Math.min(mW/iw,mH/ih);
+  activeState.panX=0;activeState.panY=0;
+  slZoom.value=activeState.zoom;
+  slZoomVal.textContent=activeState.zoom.toFixed(2)+'×';
+  drawModal();
+});
+document.getElementById('fillBtn').addEventListener('click',()=>{
+  if(!activeState.img)return;
+  const iw=activeState.img.naturalWidth,ih=activeState.img.naturalHeight;
+  activeState.zoom=Math.max(mW/iw,mH/ih);
+  activeState.panX=0;activeState.panY=0;
+  slZoom.value=activeState.zoom;
+  slZoomVal.textContent=activeState.zoom.toFixed(2)+'×';
+  drawModal();
+});
+
+// Drag to pan
+modalWrap.addEventListener('mousedown',e=>{
+  modalDragging=true;
+  mdX=e.clientX;mdY=e.clientY;
+  mdPX=activeState.panX;mdPY=activeState.panY;
+});
+window.addEventListener('mousemove',e=>{
+  if(!modalDragging)return;
+  activeState.panX=mdPX+(e.clientX-mdX);
+  activeState.panY=mdPY+(e.clientY-mdY);
+  drawModal();
+});
+window.addEventListener('mouseup',()=>{modalDragging=false;});
+
+// Touch pan
+modalWrap.addEventListener('touchstart',e=>{
+  modalDragging=true;
+  mdX=e.touches[0].clientX;mdY=e.touches[0].clientY;
+  mdPX=activeState.panX;mdPY=activeState.panY;
+},{passive:true});
+window.addEventListener('touchmove',e=>{
+  if(!modalDragging)return;
+  activeState.panX=mdPX+(e.touches[0].clientX-mdX);
+  activeState.panY=mdPY+(e.touches[0].clientY-mdY);
+  drawModal();
+},{passive:true});
+window.addEventListener('touchend',()=>{modalDragging=false;});
+
+document.getElementById('applyBtn').addEventListener('click',()=>{
+  const s=photoState.get(activeDrop);
+  s.zoom=activeState.zoom;
+  s.rot=activeState.rot;
+  s.panX=activeState.panX;
+  s.panY=activeState.panY;
+  renderDropCanvas(activeDrop);
+  updateProgress();
+  modalBg.classList.remove('open');
+});
+document.getElementById('cancelBtn').addEventListener('click',()=>{
+  modalBg.classList.remove('open');
+});
+document.getElementById('removeBtn').addEventListener('click',()=>{
+  const s=photoState.get(activeDrop);
+  s.img=null;s.zoom=1;s.rot=0;s.panX=0;s.panY=0;
+  renderDropCanvas(activeDrop);
+  updateProgress();
+  modalBg.classList.remove('open');
+});
+
+function renderDropCanvas(drop){
+  const s=photoState.get(drop);
+  let c=drop.querySelector('canvas.photo-canvas');
+  if(!c){c=document.createElement('canvas');c.className='photo-canvas';drop.insertBefore(c,drop.firstChild);}
+  const dw=parseInt(drop.style.width),dh=parseInt(drop.style.height);
+  c.width=dw;c.height=dh;
+  c.style.width=dw+'px';c.style.height=dh+'px';
+  const ctx=c.getContext('2d');
+  ctx.clearRect(0,0,dw,dh);
+  ctx.fillStyle='white';ctx.fillRect(0,0,dw,dh);
+  if(!s.img){drop.classList.remove('has-img');return;}
+  drop.classList.add('has-img');
+  ctx.save();
+  ctx.translate(dw/2+s.panX*(dw/mW||1), dh/2+s.panY*(dh/mH||1));
+  ctx.rotate(s.rot*Math.PI/180);
+  ctx.scale(s.zoom,s.zoom);
+  const img=s.img;
+  ctx.drawImage(img,-img.naturalWidth/2,-img.naturalHeight/2);
+  ctx.restore();
+}
+
+fileInput.addEventListener('change',e=>{
+  const f=e.target.files[0];
+  if(!f||!activeDrop)return;
+  const url=URL.createObjectURL(f);
+  const img=new Image();
+  img.onload=()=>{
+    const s=photoState.get(activeDrop);
+    s.img=img;
+    // auto-fill zoom
+    const dw=parseInt(activeDrop.style.width),dh=parseInt(activeDrop.style.height);
+    s.zoom=Math.max(dw/img.naturalWidth,dh/img.naturalHeight);
+    s.rot=0;s.panX=0;s.panY=0;
+    renderDropCanvas(activeDrop);
+    updateProgress();
+    openModal(activeDrop);
+  };
+  img.src=url;
+  fileInput.value='';
+});
+
+function buildCellEl(type,x,y,pw_cm,ph_cm){
+  const cw=cm(pw_cm+BDR*2),ch=cm(ph_cm+BDR+NOTE);
+  const bdr=cm(BDR),nH=cm(NOTE),pH=cm(ph_cm),pW=cm(pw_cm);
+  const cell=document.createElement('div');
+  cell.className='cell';
+  cell.style.cssText=`left:${x}px;top:${y}px;width:${cw}px;height:${ch}px;border:0.5px solid #ccc;`;
+
+  const drop=document.createElement('div');
+  drop.className='photo-drop';
+  drop.style.cssText=`left:${bdr}px;top:${bdr}px;width:${pW}px;height:${pH}px;`;
+  photoState.set(drop,{img:null,zoom:1,rot:0,panX:0,panY:0});
+
+  const hint=document.createElement('div');
+  hint.className='drop-hint';
+  hint.innerHTML=`<div class="plus">+</div><div class="lbl">tap to add photo</div>`;
+  drop.appendChild(hint);
+
+  const ctrl=document.createElement('div');
+  ctrl.className='photo-controls';
+  const adjBtn=document.createElement('button');
+  adjBtn.textContent='✎ adjust';
+  adjBtn.addEventListener('click',e=>{e.stopPropagation();openModal(drop);});
+  ctrl.appendChild(adjBtn);
+  drop.appendChild(ctrl);
+
+  drop.addEventListener('click',()=>{
+    const s=photoState.get(drop);
+    if(s.img){openModal(drop);}
+    else{activeDrop=drop;fileInput.click();}
+  });
+  drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('dragover');});
+  drop.addEventListener('dragleave',()=>drop.classList.remove('dragover'));
+  drop.addEventListener('drop',e=>{
+    e.preventDefault();drop.classList.remove('dragover');
+    const f=e.dataTransfer.files[0];
+    if(f&&f.type.startsWith('image/')){
+      activeDrop=drop;
+      const url=URL.createObjectURL(f);
+      const img=new Image();
+      img.onload=()=>{
+        const s=photoState.get(drop);
+        s.img=img;
+        const dw=parseInt(drop.style.width),dh=parseInt(drop.style.height);
+        s.zoom=Math.max(dw/img.naturalWidth,dh/img.naturalHeight);
+        s.rot=0;s.panX=0;s.panY=0;
+        renderDropCanvas(drop);
+        updateProgress();
+        openModal(drop);
+      };
+      img.src=url;
+    }
+  });
+
+  cell.appendChild(drop);
+
+  // notes
+  const na=document.createElement('div');
+  na.className='notes-area';
+  const naTop=bdr+pH;
+  na.style.cssText=`left:0;top:${naTop}px;width:${cw}px;height:${nH}px;border-top:0.5px solid #ccc;`;
+
+  cell.appendChild(na);
+  return cell;
+}
+
+function makeA4El(){
+  const div=document.createElement('div');
+  div.className='a4';
+  div.style.width=A4W+'px';
+  div.style.height=A4H+'px';
+  return div;
+}
+
+function placeRow(page,types_dims,y){
+  const totalW=types_dims.reduce((s,d)=>s+cm(d.cw),0);
+  let x=Math.round((A4W-totalW)/2);
+  types_dims.forEach(d=>{
+    page.appendChild(buildCellEl(d.type,x,y,d.pw,d.ph));
+    x+=cm(d.cw);
+  });
+}
+
+const root=document.getElementById('root');
+const a4Pages=[];
+
+// Toolbar
+const toolbar=document.createElement('div');
+toolbar.className='toolbar';
+toolbar.innerHTML=`<label>Export:</label>
+<select id="pgSel"><option value="0">Page 1 — Large photos (PNG)</option><option value="1">Page 2 — 5×5 (1–16) (PNG)</option><option value="2">Page 3 — 5×5 (17–32) (PNG)</option><option value="all">All pages (PDF)</option></select>
+<button class="export-btn" id="exportBtn">Export</button>
+<span id="progText" class="prog"></span>`;
+root.appendChild(toolbar);
+
+// PAGE 1
+const pg1=makeA4El();
+let cy=0;
+const r1h=cm(5.5+BDR+NOTE);
+placeRow(pg1,[{type:'8x6',cw:8+BDR*2,pw:8,ph:5.5},{type:'8x6',cw:8+BDR*2,pw:8,ph:5.5}],cy);cy+=r1h;
+placeRow(pg1,[{type:'8x6',cw:8+BDR*2,pw:8,ph:5.5},{type:'8x6',cw:8+BDR*2,pw:8,ph:5.5}],cy);cy+=r1h;
+placeRow(pg1,[{type:'8x6',cw:8+BDR*2,pw:8,ph:5.5}],cy);cy+=r1h;
+const r4h=cm(4.5+BDR+NOTE);
+placeRow(pg1,[{type:'7x5',cw:7+BDR*2,pw:7,ph:4.5},{type:'7x5',cw:7+BDR*2,pw:7,ph:4.5},{type:'6x6',cw:6+BDR*2,pw:6,ph:4.5}],cy);
+
+const pg1div=document.createElement('div');
+pg1div.className='page-card';
+pg1div.innerHTML=`<div class="section-title">Page 1 — Large photos</div><div class="section-sub">Tap a box to add · tap again or hover for adjust/rotate options · drag image files directly onto boxes</div>`;
+const w1=document.createElement('div');w1.className='a4-wrap';w1.appendChild(pg1);
+pg1div.appendChild(w1);
+root.appendChild(pg1div);
+a4Pages.push(pg1);
+
+// PAGES 2 & 3
+const pw5f=4.8,ph5f=4.8,cw5f=pw5f+BDR*2,ch5f=ph5f+BDR+NOTE;
+const cols5f=Math.floor(21/cw5f),rows5f=Math.floor(29.7/ch5f),per5f=cols5f*rows5f;
+for(let pg=0;pg<2;pg++){
+  const a4=makeA4El();
+  const startIdx=pg*per5f,count=Math.min(per5f,32-startIdx);
+  let i=0;
+  for(let r=0;r<rows5f&&i<count;r++){
+    for(let c=0;c<cols5f&&i<count;c++){
+      a4.appendChild(buildCellEl('5x5',Math.round(c*cm(cw5f)),Math.round(r*cm(ch5f)),pw5f,ph5f));
+      i++;
+    }
+  }
+  const card=document.createElement('div');
+  card.className='page-card';
+  card.innerHTML=`<div class="section-title">Page ${2+pg} — 5×5 cm photos (${startIdx+1}–${startIdx+count} of 32)</div><div class="section-sub">Tap a box to add · tap again or hover for adjust/rotate options</div>`;
+  const w=document.createElement('div');w.className='a4-wrap';w.appendChild(a4);
+  card.appendChild(w);
+  root.appendChild(card);
+  a4Pages.push(a4);
+}
+
+function updateProgress(){
+  const total=document.querySelectorAll('.photo-drop').length;
+  const filled=document.querySelectorAll('.photo-drop.has-img').length;
+  document.getElementById('progText').textContent=`${filled} / ${total} photos filled`;
+}
+updateProgress();
+
+// ── High-quality direct-render export ──────────────────────────────────────
+// 300 DPI for A4: 210mm × 297mm @ 300dpi = 2480 × 3508 px
+const EXPORT_DPI = 300;
+const MM_TO_PX = EXPORT_DPI / 25.4; // 1 mm in export pixels
+
+// Screen rendering uses S=28 px/cm = 2.8 px/mm
+// Export uses MM_TO_PX px/mm
+// Scale factor from screen coords → export coords:
+const SCREEN_MM = S / 10; // px per mm on screen
+function toEx(screenPx){ return Math.round(screenPx / SCREEN_MM * MM_TO_PX); }
+
+function renderPageToCanvas(a4El){
+  const EW = Math.round(210 * MM_TO_PX);  // 2480
+  const EH = Math.round(297 * MM_TO_PX);  // 3508
+  const canvas = document.createElement('canvas');
+  canvas.width = EW;
+  canvas.height = EH;
+  const ctx = canvas.getContext('2d');
+
+  // White background
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, EW, EH);
+
+  // Draw each cell
+  const cells = a4El.querySelectorAll('.cell');
+  cells.forEach(cell => {
+    const cx = toEx(parseInt(cell.style.left));
+    const cy = toEx(parseInt(cell.style.top));
+    const cw = toEx(parseInt(cell.style.width));
+    const ch = toEx(parseInt(cell.style.height));
+
+    // Cell border
+    ctx.strokeStyle = '#cccccc';
+    ctx.lineWidth = Math.round(0.3 * MM_TO_PX);
+    ctx.strokeRect(cx + ctx.lineWidth/2, cy + ctx.lineWidth/2, cw - ctx.lineWidth, ch - ctx.lineWidth);
+
+    // Photo drop zone
+    const drop = cell.querySelector('.photo-drop');
+    if(drop){
+      const px = cx + toEx(parseInt(drop.style.left));
+      const py = cy + toEx(parseInt(drop.style.top));
+      const pw = toEx(parseInt(drop.style.width));
+      const ph = toEx(parseInt(drop.style.height));
+
+      // White photo background
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(px, py, pw, ph);
+
+      const s = photoState.get(drop);
+      if(s && s.img){
+        // Clip to photo cell bounds
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(px, py, pw, ph);
+        ctx.clip();
+
+        // The zoom/pan stored in state was calibrated against the screen drop size.
+        // We need to scale zoom & pan to export resolution.
+        const screenDW = parseInt(drop.style.width);
+        const screenDH = parseInt(drop.style.height);
+        const scaleRatio = pw / screenDW; // export px / screen px
+
+        // Center of photo cell in export coords
+        const centerX = px + pw / 2;
+        const centerY = py + ph / 2;
+
+        // Pan was set in screen-modal coords (mW×mH preview).
+        // renderDropCanvas scales pan by (dw/mW), so effective screen pan = panX*(dw/mW).
+        // In export we scale that same effective pan by scaleRatio.
+        const effectivePanX = s.panX * (screenDW / (mW || screenDW));
+        const effectivePanY = s.panY * (screenDH / (mH || screenDH));
+
+        ctx.translate(centerX + effectivePanX * scaleRatio,
+                      centerY + effectivePanY * scaleRatio);
+        ctx.rotate(s.rot * Math.PI / 180);
+        // zoom was set relative to screen drop size; convert to export scale
+        const exportZoom = s.zoom * scaleRatio;
+        ctx.scale(exportZoom, exportZoom);
+        ctx.drawImage(s.img, -s.img.naturalWidth/2, -s.img.naturalHeight/2);
+        ctx.restore();
+      }
+
+      // Photo border
+      ctx.strokeStyle = '#cccccc';
+      ctx.lineWidth = Math.round(0.2 * MM_TO_PX);
+      ctx.strokeRect(px, py, pw, ph);
+
+      // Notes area divider line
+      const naTop = py + ph;
+      const naBottom = cy + ch;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(cx, naTop, cw, naBottom - naTop);
+      ctx.strokeStyle = '#cccccc';
+      ctx.lineWidth = Math.round(0.2 * MM_TO_PX);
+      ctx.beginPath();
+      ctx.moveTo(cx, naTop);
+      ctx.lineTo(cx + cw, naTop);
+      ctx.stroke();
+    }
+  });
+
+  return canvas;
+}
+
+document.getElementById('exportBtn').addEventListener('click', async () => {
+  const sel = document.getElementById('pgSel').value;
+  const btn = document.getElementById('exportBtn');
+  btn.textContent = 'Rendering…'; btn.disabled = true;
+
+  try {
+    if(sel === 'all'){
+      btn.textContent = 'Building PDF…';
+      const {jsPDF} = window.jspdf;
+      const pdf = new jsPDF({orientation:'portrait', unit:'mm', format:'a4'});
+      for(let i = 0; i < a4Pages.length; i++){
+        btn.textContent = `Page ${i+1}/${a4Pages.length}…`;
+        await new Promise(r => setTimeout(r, 10)); // allow UI update
+        const canvas = renderPageToCanvas(a4Pages[i]);
+        if(i > 0) pdf.addPage();
+        pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, 210, 297);
+      }
+      pdf.save('photo_layout_hq.pdf');
+    } else {
+      const idx = parseInt(sel);
+      await new Promise(r => setTimeout(r, 10));
+      const canvas = renderPageToCanvas(a4Pages[idx]);
+      const a = document.createElement('a');
+      a.href = canvas.toDataURL('image/png');
+      a.download = `photo_layout_page${idx+1}_hq.png`;
+      a.click();
+    }
+  } catch(err){ alert('Export failed: ' + err.message); }
+  btn.textContent = 'Export'; btn.disabled = false;
+});
+</script>
